@@ -1,70 +1,119 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { GenerationResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-const SYSTEM_INSTRUCTION = `
-You are an Elite Senior Frontend Architect. Your task is to generate standalone, production-ready React components using Tailwind CSS.
+const toPascalCase = (str: string): string => {
+  return str.replace(/[-_ ]+/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join('').replace(/[^a-zA-Z0-9]/g, '');
+};
 
-Core Technical Constraints:
-1. Framework: React (Latest), TypeScript.
-2. Styling: Tailwind CSS utility classes exclusively. No external CSS.
-3. Icons: Lucide React (simulated imports like 'lucide-react').
-4. Code Quality: Clean code, accessible (ARIA labels), responsive design (mobile-first), and high-performance patterns.
-5. Component Structure: Use functional components with hooks. Include prop-types (TS interfaces).
-6. File Organization: Provide the code in a JSON format.
-
-JSON Specification:
-- 'componentName': The PascalCase name of the primary component (e.g., 'HeroSection').
-- 'files': An array of objects, each containing:
-    - 'path': The filename (e.g., 'HeroSection.tsx').
-    - 'content': The full source code as a string.
-
-Behavior:
-- If the user asks for a simple button, provide a highly stylized, reusable button component.
-- If the user asks for a complex page, break it down into the primary component and any necessary sub-components within the 'files' array.
-- DO NOT wrap the JSON in markdown code blocks.
-- Focus on modern, high-end aesthetics (glassmorphism, clean typography, subtle animations).
+const FRAMEWORK_MATRIX_CONTEXT = `
+Frameworks: Next.js, SvelteKit, Nuxt, Astro, Remix, Vite.
+Features: SSR, Edge Routing, Middleware, ISR, Image Optimization.
+Design Style: Vercel-inspired, dark mode, high-contrast, professional spacing.
 `;
 
-export const generateFrontendProject = async (prompt: string): Promise<GenerationResult> => {
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            componentName: { 
-              type: Type.STRING,
-              description: "The name of the main React component."
-            },
-            files: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  path: { type: Type.STRING },
-                  content: { type: Type.STRING }
-                },
-                required: ["path", "content"]
-              }
-            }
-          },
-          required: ["componentName", "files"]
-        }
-      }
-    });
+export const generateFrontendProject = async (prompt: string, useThinking: boolean = false): Promise<GenerationResult> => {
+  const config: any = {
+    systemInstruction: `You are a high-performance Intelligent Compiler. 
+    ${FRAMEWORK_MATRIX_CONTEXT}
+    When generating a "Modal" component, use Tailwind CSS for smooth animations (opacity/scale transitions) and a backdrop-blur. 
+    Ensure it accepts title, content, isOpen, and onClose props.
+    Output Format: Pure JSON only.`,
+    responseMimeType: "application/json",
+  };
 
-    const text = response.text || '{"componentName": "ErrorComponent", "files": []}';
-    const data = JSON.parse(text);
-    return data as GenerationResult;
-  } catch (error) {
-    console.error("Gemini Architectural Generation Error:", error);
-    throw error;
+  if (useThinking) {
+    config.thinkingConfig = { thinkingBudget: 32768 };
   }
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-pro-preview",
+    contents: prompt,
+    config
+  });
+
+  const data = JSON.parse(response.text || '{}');
+  if (data.componentName) data.componentName = toPascalCase(data.componentName);
+  return data as GenerationResult;
+};
+
+export const groundedChat = async (prompt: string, tools: ('search' | 'maps')[]): Promise<{ text: string; links: any[] }> => {
+  const toolConfig: any[] = [];
+  if (tools.includes('search')) toolConfig.push({ googleSearch: {} });
+  if (tools.includes('maps')) toolConfig.push({ googleMaps: {} });
+
+  const response = await ai.models.generateContent({
+    model: tools.includes('maps') ? "gemini-2.5-flash" : "gemini-3-flash-preview",
+    contents: prompt,
+    config: { tools: toolConfig }
+  });
+
+  const links = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => 
+    c.web ? { uri: c.web.uri, title: c.web.title } : c.maps ? { uri: c.maps.uri, title: c.maps.title } : null
+  ).filter(Boolean) || [];
+
+  return { text: response.text || '', links };
+};
+
+export const generateImagePro = async (prompt: string, aspectRatio: string, imageSize: string): Promise<string> => {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-image-preview',
+    contents: prompt,
+    config: { imageConfig: { aspectRatio, imageSize } },
+  });
+
+  for (const part of response.candidates[0].content.parts) {
+    if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+  }
+  throw new Error("No image generated.");
+};
+
+export const editImage = async (prompt: string, base64Data: string): Promise<string> => {
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [
+        { inlineData: { data: base64Data, mimeType: 'image/png' } },
+        { text: prompt }
+      ]
+    }
+  });
+
+  for (const part of response.candidates[0].content.parts) {
+    if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+  }
+  throw new Error("Editing failed.");
+};
+
+export const generateVideoVeo = async (prompt: string, aspectRatio: '16:9' | '9:16', sourceImage?: string): Promise<string> => {
+  let operation = await ai.models.generateVideos({
+    model: 'veo-3.1-fast-generate-preview',
+    prompt,
+    image: sourceImage ? { imageBytes: sourceImage, mimeType: 'image/png' } : undefined,
+    config: { numberOfVideos: 1, resolution: '720p', aspectRatio }
+  });
+
+  while (!operation.done) {
+    await new Promise(resolve => setTimeout(resolve, 10000));
+    operation = await ai.operations.getVideosOperation({ operation: operation });
+  }
+
+  const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+  return `${downloadLink}&key=${process.env.API_KEY}`;
+};
+
+export const generateSpeech = async (text: string): Promise<string> => {
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-tts",
+    contents: [{ parts: [{ text }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+      },
+    },
+  });
+  return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || "";
 };
