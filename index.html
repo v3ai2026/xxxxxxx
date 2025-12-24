@@ -1,3 +1,4 @@
+
 <script type="importmap">
 {
   "imports": {
@@ -19,15 +20,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-base: #0a0a0a;
-            --bg-surface: #121212;
-            --bg-surface-elevated: #1a1a1a;
+            --bg-base: #050505;
+            --bg-surface: #0c0c0c;
             --gold-primary: #D4AF37;
             --gold-light: #F9E5A0;
-            --border-subtle: #222222;
+            --border-subtle: #1a1a1a;
             --text-primary: #ffffff;
-            --text-secondary: #c0c0c0; /* Increased contrast from a0a0a0 */
-            --text-dim: #888888;       /* Increased contrast from 666666 */
+            --text-secondary: #c0c0c0;
         }
 
         body { 
@@ -40,80 +39,41 @@
             -webkit-font-smoothing: antialiased;
         }
 
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #222; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--gold-primary); }
-        
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--gold-primary); border-radius: 50%; cursor: pointer; border: 2px solid var(--bg-base); }
 
-        /* Neural Transitions Registry */
-        @keyframes modal-zoom {
-            0% { opacity: 0; transform: scale(0.8) translateY(30px); filter: blur(10px); }
-            100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
-        }
-        @keyframes modal-fade {
-            from { opacity: 0; filter: blur(20px); }
-            to { opacity: 1; filter: blur(0); }
-        }
-        @keyframes modal-slide {
-            from { opacity: 0; transform: translateY(60px); filter: blur(10px); }
-            to { opacity: 1; transform: translateY(0); filter: blur(0); }
-        }
-        @keyframes modal-fade-slide-in {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes backdrop-fade {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        /* Enterprise Gold Glow */
         @keyframes gold-glow {
-            0%, 100% { box-shadow: 0 0 20px rgba(212, 175, 55, 0.07); }
-            50% { box-shadow: 0 0 50px rgba(212, 175, 55, 0.18); }
+            0%, 100% { box-shadow: 0 0 15px rgba(212, 175, 55, 0.1); }
+            50% { box-shadow: 0 0 35px rgba(212, 175, 55, 0.25); }
         }
 
-        .animate-modal-zoom { animation: modal-zoom 0.5s cubic-bezier(0.19, 1, 0.22, 1) forwards; }
-        .animate-modal-fade { animation: modal-fade 0.5s ease-out forwards; }
-        .animate-modal-slide { animation: modal-slide 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        .animate-modal-fade-slide-in { animation: modal-fade-slide-in 0.4s ease-out forwards; }
-        .animate-backdrop { animation: backdrop-fade 0.5s ease-out forwards; }
-        .gold-glow { animation: gold-glow 6s infinite ease-in-out; }
-
-        .glass-panel {
-            background: rgba(18, 18, 18, 0.85);
-            backdrop-filter: blur(30px);
-            border: 1px solid var(--border-subtle);
-        }
-
-        .text-gold {
-            background: linear-gradient(135deg, #D4AF37 0%, #F9E5A0 50%, #D4AF37 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
+        .gold-glow { animation: gold-glow 4s infinite ease-in-out; }
+        
         .bg-gold-gradient {
             background: linear-gradient(135deg, #D4AF37 0%, #AA8A2E 100%);
         }
 
-        .border-gold-subtle {
-            border-color: rgba(212, 175, 55, 0.3);
+        .text-gold {
+            background: linear-gradient(135deg, #D4AF37 0%, #F9E5A0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
-        /* Improved Readability Fixes */
-        .tracking-neural {
-            letter-spacing: 0.12em; /* Slightly tighter for better readability of longer strings */
+        .glass-panel {
+            background: rgba(12, 12, 12, 0.7);
+            backdrop-filter: blur(40px);
+            border: 1px solid var(--border-subtle);
         }
 
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: rgba(212, 175, 55, 0.2);
+        @keyframes modal-fade {
+            from { opacity: 0; filter: blur(10px); transform: scale(0.98); }
+            to { opacity: 1; filter: blur(0); transform: scale(1); }
         }
+        .animate-modal-fade { animation: modal-fade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
-        .surface-1 { background-color: var(--bg-base); }
-        .surface-2 { background-color: var(--bg-surface); }
-        .surface-3 { background-color: var(--bg-surface-elevated); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(212, 175, 55, 0.2); }
     </style>
 </head>
 <body>

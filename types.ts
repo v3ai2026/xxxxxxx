@@ -64,6 +64,7 @@ export interface AIAgent {
 export enum TabType {
   INBOX = 'INBOX',
   WORKSPACE = 'WORKSPACE',
+  WEBSITE_GEN = 'WEBSITE_GEN',
   EDITOR = 'EDITOR',
   KNOWLEDGE = 'KNOWLEDGE',
   BROWSER = 'BROWSER',

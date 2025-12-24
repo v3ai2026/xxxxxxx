@@ -73,8 +73,9 @@ export const NeuralModal: React.FC<NeuralModalProps> = ({
 
     if (e.key === 'Tab' && modalRef.current) {
       const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-      const focusables = Array.from(modalRef.current.querySelectorAll<HTMLElement>(focusableSelector))
-        .filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);
+      // Fix: cast to HTMLElement array to avoid 'unknown' type errors and ensure DOM properties like offsetParent are available.
+      const elements = Array.from(modalRef.current.querySelectorAll(focusableSelector)) as HTMLElement[];
+      const focusables = elements.filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);
       
       if (focusables.length === 0) {
         e.preventDefault();
