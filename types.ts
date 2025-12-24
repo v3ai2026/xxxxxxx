@@ -62,7 +62,6 @@ export interface AIAgent {
 }
 
 export enum TabType {
-  INBOX = 'INBOX',
   WORKSPACE = 'WORKSPACE',
   WEBSITE_GEN = 'WEBSITE_GEN',
   IMAGE_GEN = 'IMAGE_GEN',
@@ -70,11 +69,11 @@ export enum TabType {
   KNOWLEDGE = 'KNOWLEDGE',
   BROWSER = 'BROWSER',
   AGENT_MANAGER = 'AGENT_MANAGER',
-  LOGS = 'LOGS',
   DEPLOY = 'DEPLOY',
   GITHUB = 'GITHUB',
   PLUGINS = 'PLUGINS',
   GCS = 'GCS',
   FIGMA = 'FIGMA',
-  DRIVE = 'DRIVE'
+  DRIVE = 'DRIVE',
+  BLOB = 'BLOB'
 }

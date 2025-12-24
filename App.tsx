@@ -1,31 +1,36 @@
 
-// @google/genai guidelines followed: Always use process.env.API_KEY directly for API calls.
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { GoogleGenAI } from "@google/genai";
-import { generateFullStackProject } from './services/geminiService';
+import { generateFullStackProject, convertToColabNotebook } from './services/geminiService';
 import { deployToVercel, checkDeploymentStatus } from './services/vercelService';
 import { GitHubService } from './services/githubService';
 import { GCSService } from './services/gcsService';
 import { GoogleDriveService } from './services/googleDriveService';
-import { COMPONENT_LIBRARY } from './services/library';
+import { VercelBlobService } from './services/vercelBlobService';
+import { COMPONENT_LIBRARY, TEMPLATE_LIBRARY } from './services/library';
+import { PLUGIN_REGISTRY } from './services/extensionService';
 import { NeuralModal } from './components/NeuralModal';
-import { GeneratedFile, TabType, DeploymentStatus, ModelConfig, GenerationResult, AIAgent } from './types';
+import { performNeuralCrawl } from './services/scraperService';
+import { GeneratedFile, TabType, DeploymentStatus, ModelConfig, GenerationResult, AIAgent, Extension } from './types';
 
-const INITIAL_SYSTEM = `你是一个顶级进化级全栈 AI 编排系统（IntelliBuild Studio Core）。你正在操作一个分布式的代理集群。风格：极致简约、企业级、奢华深色、Nuxt 翠绿风格。
-你负责生成高质量的代码、图像和网站。`;
+const INITIAL_SYSTEM = `你是一个顶级进化级全栈 AI 编排 system（IntelliBuild Studio Core）。你正在操作一个分布式的代理集群。风格：极致简约、企业级、奢华深色、Nuxt 翠绿风格。`;
+
+const MARKETPLACE_AGENTS: AIAgent[] = [
+  { id: 'm1', name: 'Cyber-Security-Sec', role: 'Security Auditor', model: 'gemini-3-pro-preview', instruction: 'Specializes in identifying SQL injection, XSS, and broken access control in Next.js applications.', status: 'idle' },
+  { id: 'm2', name: 'Performance-Turbo', role: 'Optimization Specialist', model: 'gemini-3-flash-preview', instruction: 'Optimizes bundle size, LCP, and CLS scores. Focuses on Vercel Edge Runtime efficiency.', status: 'idle' },
+  { id: 'm3', name: 'Copy-Genius', role: 'UX Content Strategist', model: 'gemini-3-flash-preview', instruction: 'Generates high-conversion SaaS copy, micro-interactions text, and multi-lingual localized strings.', status: 'idle' },
+  { id: 'm4', name: 'Data-Scientist-Bot', role: 'Inference Architect', model: 'gemini-3-pro-preview', instruction: 'Orchestrates complex data processing pipelines and vector database integrations.', status: 'idle' }
+];
 
 const App: React.FC = () => {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    temperature: 0.7,
-    topP: 0.95,
-    topK: 40,
-    thinkingBudget: 0,
+    temperature: 0.7, topP: 0.95, topK: 40, thinkingBudget: 0,
     systemInstruction: INITIAL_SYSTEM
   });
 
-  // Initializing active tab to GITHUB as requested
-  const [activeTab, setActiveTab] = useState<TabType>(TabType.GITHUB);
+  const [activeTab, setActiveTab] = useState<TabType>(TabType.WORKSPACE);
+  const [agentTab, setAgentTab] = useState<'TEAM' | 'REGISTRY'>('TEAM');
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
@@ -35,434 +40,209 @@ const App: React.FC = () => {
   const [vercelToken, setVercelToken] = useState('');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
-  // --- Google Authentication States ---
+  // Agent Management States
+  const [agents, setAgents] = useState<AIAgent[]>([
+    { id: '1', name: 'Nuxt-Architect', role: 'System Orchestrator', model: 'gemini-3-pro-preview', instruction: 'Primary architecture strategy focused on performance and modern green aesthetics.', status: 'active' },
+    { id: '2', name: 'Vibrant-UI', role: 'Aesthetic Specialist', model: 'gemini-3-flash-preview', instruction: 'Ensures Nuxt Green and Deep Navy aesthetics across all components.', status: 'idle' }
+  ]);
+  const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<Partial<AIAgent> | null>(null);
+
+  // Auth & Infrastructure States
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [accessToken, setAccessToken] = useState<string>('');
-
-  // --- GitHub Orchestration States ---
   const [ghToken, setGhToken] = useState('');
-  const [ghRepoName, setGhRepoName] = useState('');
-  const [ghDescription, setGhDescription] = useState('Initialized via IntelliBuild Studio');
-  const [ghIsProvisioning, setGhIsProvisioning] = useState(false);
-  const [ghLogs, setGhLogs] = useState<string[]>([]);
+  const [blobToken, setBlobToken] = useState('');
+  const [blobList, setBlobList] = useState<any[]>([]);
 
-  // --- GCS Orchestration States ---
-  const [gcsProjectId, setGcsProjectId] = useState('');
-  const [gcsBuckets, setGcsBuckets] = useState<any[]>([]);
-  const [gcsObjects, setGcsObjects] = useState<any[]>([]);
-  const [selectedBucket, setSelectedBucket] = useState('');
-  const [gcsIsLoading, setGcsIsLoading] = useState(false);
-  const [gcsLogs, setGcsLogs] = useState<string[]>([]);
-  const [gcsSearch, setGcsSearch] = useState('');
-  const [newBucketName, setNewBucketName] = useState('');
-
-  // --- Google Drive Orchestration States ---
-  const [driveIsLoading, setDriveIsLoading] = useState(false);
-  const [driveLogs, setDriveLogs] = useState<string[]>([]);
-  const [driveFolders, setDriveFolders] = useState<any[]>([]);
-  const [selectedDriveFolder, setSelectedDriveFolder] = useState('');
-
-  // --- Website Generation States ---
+  // Orchestration States
   const [webPrompt, setWebPrompt] = useState('');
   const [isWebGenLoading, setIsWebGenLoading] = useState(false);
   const [generatedHtml, setGeneratedHtml] = useState<string | null>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
+  const [browserQuery, setBrowserQuery] = useState('');
+  const [browserResult, setBrowserResult] = useState<any>(null);
 
-  // --- Image Generation States ---
-  const [imagePrompt, setImagePrompt] = useState('');
-  const [isImageGenerating, setIsImageGenerating] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
-
-  // --- Agent Manager State ---
-  const [agents, setAgents] = useState<AIAgent[]>([
-    { id: '1', name: 'Nuxt-Architect', role: 'System Orchestrator', model: 'gemini-3-pro-preview', instruction: 'Primary architecture strategy focused on performance and modern green aesthetics.', status: 'active' },
-    { id: '2', name: 'Vibrant-UI', role: 'Aesthetic Specialist', model: 'gemini-3-flash-preview', instruction: 'Ensures Nuxt Green and Deep Navy aesthetics.', status: 'idle' }
-  ]);
-
-  // Google OAuth Initialization
+  // Initialize Google SDKs
   useEffect(() => {
-    // @ts-ignore
-    if (window.google) {
-      // @ts-ignore
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: '439600021319-33on7g6a29g3r6poh8t1v4p0a3b04c0r.apps.googleusercontent.com', // Placeholder Client ID
-        scope: 'openid profile email https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/devstorage.full_control',
-        callback: (response: any) => {
-          if (response.access_token) {
-            setAccessToken(response.access_token);
-            fetchUserInfo(response.access_token);
-          }
-        },
-      });
-      // Store client in a ref or local if needed for recurring requests
-    }
-  }, []);
-
-  const handleGoogleLogin = () => {
-    // @ts-ignore
-    const client = window.google.accounts.oauth2.initTokenClient({
+    if ((window as any).google) {
+      (window as any).google.accounts.oauth2.initTokenClient({
         client_id: '439600021319-33on7g6a29g3r6poh8t1v4p0a3b04c0r.apps.googleusercontent.com',
         scope: 'openid profile email https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/devstorage.full_control',
         callback: (response: any) => {
           if (response.access_token) {
             setAccessToken(response.access_token);
-            fetchUserInfo(response.access_token);
+            fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${response.access_token}` }
+            }).then(r => r.json()).then(setGoogleUser);
           }
         },
       });
-    client.requestAccessToken();
-  };
-
-  const fetchUserInfo = async (token: string) => {
-    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (res.ok) {
-      const data = await res.ok ? await res.json() : null;
-      setGoogleUser(data);
     }
-  };
+  }, []);
 
-  // Sync suggestion
-  useEffect(() => {
-    if (generationResult && !ghRepoName) {
-      setGhRepoName(generationResult.projectName.toLowerCase().replace(/\s+/g, '-'));
-    }
-  }, [generationResult]);
-
-  // Update Preview for Website Gen
-  useEffect(() => {
-    if (generatedHtml && previewRef.current && activeTab === TabType.WEBSITE_GEN) {
-      const doc = previewRef.current.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(generatedHtml);
-        doc.close();
-      }
-    }
-  }, [generatedHtml, activeTab]);
-
-  // Deployment Polling
-  useEffect(() => {
-    let interval: number;
-    if (deployStatus && (deployStatus.state !== 'READY' && deployStatus.state !== 'ERROR')) {
-      interval = window.setInterval(async () => {
-        try {
-          const status = await checkDeploymentStatus(deployStatus.id, vercelToken);
-          setDeployStatus(status);
-        } catch (e) {
-          console.error("Status check failed", e);
-        }
-      }, 4000);
-    }
-    return () => clearInterval(interval);
-  }, [deployStatus, vercelToken]);
-
-  const addGhLog = (msg: string) => setGhLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
-  const addGcsLog = (msg: string) => setGcsLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
-  const addDriveLog = (msg: string) => setDriveLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
-
-  const handleGitHubSync = async () => {
-    if (!ghToken || !ghRepoName || !generationResult) return;
-    setGhIsProvisioning(true);
-    setGhLogs([]);
-    addGhLog("Initiating SCM Provisioning Protocol...");
+  const handleBlobSync = async () => {
+    if (!blobToken) return;
     try {
-      const ghService = new GitHubService(ghToken);
-      const repo = await ghService.provisionProject(ghRepoName, ghDescription);
-      addGhLog(`Repository verified: ${repo.html_url}`);
-      await ghService.pushAtomicUpdate(repo.owner.login, ghRepoName, generationResult.files);
-      addGhLog("Synchronization complete.");
-    } catch (error: any) {
-      addGhLog(`PROTOCOL ERROR: ${error.message}`);
-    } finally {
-      setGhIsProvisioning(false);
-    }
+      const service = new VercelBlobService(blobToken);
+      const data = await service.list();
+      setBlobList(data.blobs || []);
+    } catch (e) { console.error(e); }
   };
 
-  // --- GCS Handlers ---
-  const handleGCSFetchBuckets = async () => {
-    if (!accessToken || !gcsProjectId) {
-      alert("Google Login and Project ID required.");
-      return;
-    }
-    setGcsIsLoading(true);
-    addGcsLog(`Querying Projects for ${gcsProjectId}...`);
+  const handleBlobUpload = async () => {
+    if (!blobToken || !generationResult) return;
     try {
-      const gcsService = new GCSService(accessToken);
-      const buckets = await gcsService.listBuckets(gcsProjectId);
-      setGcsBuckets(buckets);
-      addGcsLog(`Discovered ${buckets.length} buckets.`);
-    } catch (error: any) {
-      addGcsLog(`FETCH ERROR: ${error.message}`);
-    } finally {
-      setGcsIsLoading(false);
-    }
+      const service = new VercelBlobService(blobToken);
+      const { url } = await service.put(`projects/${generationResult.projectName.toLowerCase()}/state.json`, JSON.stringify(generationResult), 'public');
+      handleBlobSync();
+      alert(`Persistence synchronized successfully to: ${url}`);
+    } catch (e) { console.error(e); }
   };
 
-  /**
-   * Orchestrates the creation of a new Cloud Storage bucket.
-   */
-  const handleGCSCreateBucket = async () => {
-    if (!accessToken || !gcsProjectId || !newBucketName) return;
-    setGcsIsLoading(true);
-    addGcsLog(`Provisioning new bucket: ${newBucketName}...`);
-    try {
-      const gcsService = new GCSService(accessToken);
-      await gcsService.createBucket(gcsProjectId, newBucketName);
-      addGcsLog(`Bucket ${newBucketName} created successfully.`);
-      setNewBucketName('');
-      await handleGCSFetchBuckets();
-    } catch (error: any) {
-      addGcsLog(`CREATION ERROR: ${error.message}`);
-    } finally {
-      setGcsIsLoading(false);
-    }
-  };
-
-  /**
-   * Indexes objects within a selected GCS bucket.
-   */
-  const handleGCSFetchObjects = async (bucketName: string) => {
-    if (!accessToken || !bucketName) return;
-    setGcsIsLoading(true);
-    addGcsLog(`Scanning objects in ${bucketName}...`);
-    try {
-      const gcsService = new GCSService(accessToken);
-      const objects = await gcsService.listObjects(bucketName);
-      setGcsObjects(objects);
-      addGcsLog(`Indexed ${objects.length} objects.`);
-    } catch (error: any) {
-      addGcsLog(`INDEX ERROR: ${error.message}`);
-    } finally {
-      setGcsIsLoading(false);
-    }
-  };
-
-  const handleGCSUpload = async () => {
-    if (!accessToken || !selectedBucket || !generationResult) return;
-    setGcsIsLoading(true);
-    addGcsLog(`Syncing to GCS bucket: ${selectedBucket}...`);
-    try {
-      const gcsService = new GCSService(accessToken);
-      await gcsService.uploadProject(selectedBucket, generationResult.files, generationResult.projectName.toLowerCase().replace(/\s+/g, '-'));
-      addGcsLog(`GCS Upload Successful.`);
-      await handleGCSFetchObjects(selectedBucket);
-    } catch (error: any) {
-      addGcsLog(`UPLOAD ERROR: ${error.message}`);
-    } finally {
-      setGcsIsLoading(false);
-    }
-  };
-
-  // --- Drive Handlers ---
-  const handleDriveFetchFolders = async () => {
-    if (!accessToken) {
-      alert("Please login with Google first.");
-      return;
-    }
-    setDriveIsLoading(true);
-    addDriveLog("Connecting to Google Drive Intelligence...");
-    try {
-      const driveService = new GoogleDriveService(accessToken);
-      const folders = await driveService.listFolders();
-      setDriveFolders(folders);
-      addDriveLog(`Indexed ${folders.length} Drive folders.`);
-    } catch (error: any) {
-      addDriveLog(`DRIVE ERROR: ${error.message}`);
-    } finally {
-      setDriveIsLoading(false);
-    }
-  };
-
-  const handleDriveSync = async () => {
-    if (!accessToken || !generationResult) return;
-    setDriveIsLoading(true);
-    addDriveLog(`Pushing shards to Google Drive: ${generationResult.projectName}...`);
-    try {
-      const driveService = new GoogleDriveService(accessToken);
-      await driveService.syncProject(generationResult.projectName, generationResult.files, selectedDriveFolder || undefined);
-      addDriveLog("Cloud Drive Synchronization Complete.");
-    } catch (error: any) {
-      addDriveLog(`SYNC ERROR: ${error.message}`);
-    } finally {
-      setDriveIsLoading(false);
-    }
+  const handleExportColab = () => {
+    if (!generationResult) return;
+    const notebook = convertToColabNotebook(generationResult.files, generationResult.projectName);
+    const blob = new Blob([notebook], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${generationResult.projectName.toLowerCase().replace(/\s+/g, '-')}.ipynb`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleGenerate = async () => {
     if (!input) return;
     setIsGenerating(true);
     try {
-      const result = await generateFullStackProject(input, modelConfig, COMPONENT_LIBRARY);
+      const result = await generateFullStackProject(input, modelConfig, COMPONENT_LIBRARY, []);
       setGenerationResult(result);
       if (result.files.length > 0) {
         setSelectedFile(result.files[0]);
         setActiveTab(TabType.EDITOR);
       }
-    } catch (error) {
-      console.error('Generation failed:', error);
-    } finally {
-      setIsGenerating(false);
-    }
+    } catch (e) { console.error(e); } finally { setIsGenerating(false); }
   };
 
-  /**
-   * Triggers the Vercel deployment pipeline for the current project shards.
-   */
-  const handleDeploy = async () => {
-    if (!generationResult) {
-      alert("No project generated to deploy.");
-      return;
-    }
-    if (!vercelToken) {
-      setActiveTab(TabType.DEPLOY);
-      alert("Please provide a Vercel API token in the Deploy tab.");
-      return;
-    }
-    setIsDeploying(true);
+  const handleWebGen = async () => {
+    if (!webPrompt) return;
+    setIsWebGenLoading(true);
     try {
-      const status = await deployToVercel(generationResult.files, vercelToken, generationResult.projectName);
-      setDeployStatus(status);
-      setActiveTab(TabType.DEPLOY);
-    } catch (error: any) {
-      console.error('Deployment failed:', error);
-      alert(`Deployment failed: ${error.message}`);
-    } finally {
-      setIsDeploying(false);
-    }
-  };
-
-  /**
-   * Generates visual artifacts using the Gemini 2.5 Flash Image model.
-   */
-  const handleImageGen = async () => {
-    if (!imagePrompt) return;
-    setIsImageGenerating(true);
-    setGeneratedImageUrl(null);
-    try {
-      // @google/genai: Always initialize with apiKey from process.env.API_KEY
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: imagePrompt }],
-        },
+        model: 'gemini-3-flash-preview',
+        contents: `Create a professional single-file HTML/Tailwind CSS website for: ${webPrompt}. Use modern typography and Nuxt-inspired dark theme.`,
       });
-      
-      const candidate = response.candidates?.[0];
-      if (candidate?.content?.parts) {
-        for (const part of candidate.content.parts) {
-          // Find the image part as per @google/genai guidelines
-          if (part.inlineData) {
-            const base64EncodeString = part.inlineData.data;
-            setGeneratedImageUrl(`data:image/png;base64,${base64EncodeString}`);
-            break;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Image generation failed:', error);
-    } finally {
-      setIsImageGenerating(false);
+      setGeneratedHtml(response.text || '');
+    } catch (e) { console.error(e); } finally { setIsWebGenLoading(false); }
+  };
+
+  const handleSaveAgent = () => {
+    if (!editingAgent?.name || !editingAgent?.role) return;
+    if (editingAgent.id && agents.some(a => a.id === editingAgent.id)) {
+      setAgents(prev => prev.map(a => a.id === editingAgent.id ? (editingAgent as AIAgent) : a));
+    } else {
+      const newAgent: AIAgent = {
+        ...(editingAgent as AIAgent),
+        id: Math.random().toString(36).substr(2, 9),
+        status: 'idle'
+      };
+      setAgents(prev => [...prev, newAgent]);
     }
+    setIsAgentModalOpen(false);
+    setEditingAgent(null);
+  };
+
+  const handleDownloadRegistryAgent = (marketAgent: AIAgent) => {
+    if (agents.some(a => a.name === marketAgent.name)) {
+      alert("This agent is already part of your team.");
+      return;
+    }
+    setAgents(prev => [...prev, { ...marketAgent, id: Math.random().toString(36).substr(2, 9) }]);
+    setAgentTab('TEAM');
+  };
+
+  const handleShareAgent = (agent: AIAgent) => {
+    alert(`Successfully broadcasted "${agent.name}" to the global Neural Registry. Synchronizing shards...`);
+  };
+
+  const handleDeleteAgent = (id: string) => {
+    setAgents(prev => prev.filter(a => a.id !== id));
   };
 
   return (
     <div className="flex h-screen bg-[#020420] text-white font-sans overflow-hidden">
       {/* Side Navigation */}
-      <nav className="w-24 border-r border-[#1a1e43] flex flex-col items-center py-12 gap-10 bg-[#020420] z-30 shadow-2xl">
+      <nav className="w-24 border-r border-[#1a1e43] flex flex-col items-center py-10 gap-2 bg-[#020420] z-30 shadow-2xl overflow-y-auto no-scrollbar shrink-0">
         <div 
-          className="w-14 h-14 rounded-2xl bg-nuxt-gradient shadow-[0_0_25px_rgba(0,220,130,0.4)] flex items-center justify-center text-black font-black text-2xl mb-4 cursor-pointer hover:scale-110 transition-transform active:scale-95"
+          className="w-14 h-14 rounded-2xl bg-nuxt-gradient shadow-[0_0_30px_rgba(0,220,130,0.4)] flex items-center justify-center text-black font-black text-2xl mb-8 cursor-pointer hover:scale-110 transition-transform active:scale-95 shrink-0"
           onClick={() => setActiveTab(TabType.WORKSPACE)}
-        >
-          N
+        >I</div>
+
+        <div className="flex flex-col items-center gap-4 py-4 border-b border-white/5 w-full">
+          <NavButton icon="🏠" label="Home" type={TabType.WORKSPACE} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="🎨" label="Design" type={TabType.WEBSITE_GEN} active={activeTab} onClick={setActiveTab} />
         </div>
-        {[
-          { type: TabType.WORKSPACE, icon: '🏠', label: 'Studio' },
-          { type: TabType.WEBSITE_GEN, icon: '🎨', label: 'Web Gen' },
-          { type: TabType.IMAGE_GEN, icon: '🖼️', label: 'Artifacts' },
-          { type: TabType.EDITOR, icon: '📂', label: 'Editor' },
-          { type: TabType.GITHUB, icon: '🐙', label: 'GitHub' },
-          { type: TabType.GCS, icon: '☁️', label: 'GCS' },
-          { type: TabType.DRIVE, icon: '📂', label: 'Drive' },
-          { type: TabType.AGENT_MANAGER, icon: '🤖', label: 'Agents' },
-          { type: TabType.DEPLOY, icon: '🚀', label: 'Deploy' },
-        ].map((item) => (
-          <button 
-            key={item.type}
-            onClick={() => setActiveTab(item.type)} 
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 relative group ${activeTab === item.type ? 'text-[#00DC82]' : 'text-gray-600 hover:text-white'}`}
-          >
-            <div className={`p-4 rounded-2xl transition-all ${activeTab === item.type ? 'bg-[#00DC82]/10 shadow-inner' : 'hover:bg-white/5'}`}>
-              <span className="text-2xl">{item.icon}</span>
-            </div>
-            <span className="text-[9px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">{item.label}</span>
-          </button>
-        ))}
+
+        <div className="flex flex-col items-center gap-4 py-4 border-b border-white/5 w-full">
+          <NavButton icon="📂" label="Editor" type={TabType.EDITOR} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="🤖" label="Agents" type={TabType.AGENT_MANAGER} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="🔌" label="Plugin" type={TabType.PLUGINS} active={activeTab} onClick={setActiveTab} />
+        </div>
+
+        <div className="flex flex-col items-center gap-4 py-4 border-b border-white/5 w-full">
+          <NavButton icon="🌐" label="Ground" type={TabType.BROWSER} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="🧠" label="Vault" type={TabType.KNOWLEDGE} active={activeTab} onClick={setActiveTab} />
+        </div>
+
+        <div className="flex flex-col items-center gap-4 py-4 border-b border-white/5 w-full">
+          <NavButton icon="🐙" label="SCM" type={TabType.GITHUB} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="☁️" label="Storage" type={TabType.GCS} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="📦" label="Drive" type={TabType.DRIVE} active={activeTab} onClick={setActiveTab} />
+          <NavButton icon="🗄️" label="Database" type={TabType.BLOB} active={activeTab} onClick={setActiveTab} />
+        </div>
+
+        <div className="flex flex-col items-center gap-4 pt-4 w-full">
+          <NavButton icon="🚀" label="Deploy" type={TabType.DEPLOY} active={activeTab} onClick={setActiveTab} />
+        </div>
       </nav>
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-20 border-b border-[#1a1e43] flex items-center justify-between px-12 bg-[#020420]/95 backdrop-blur-3xl z-20">
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#00DC82] animate-pulse shadow-[0_0_8px_#00DC82]" />
-              <span className="text-[10px] font-black text-[#00DC82] uppercase tracking-[0.5em]">System Core: {activeTab}</span>
-            </div>
-            <div className="h-4 w-px bg-white/10" />
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-              {generationResult ? `Project: ${generationResult.projectName}` : 'Standby Mode'}
-            </span>
+        <header className="h-20 border-b border-[#1a1e43] flex items-center justify-between px-10 bg-[#020420]/95 backdrop-blur-3xl z-20 shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#00DC82] shadow-[0_0_12px_#00DC82] animate-pulse" />
+            <h2 className="text-[11px] font-black text-[#00DC82] uppercase tracking-[0.6em]">{activeTab} Interface</h2>
           </div>
-          
           <div className="flex items-center gap-6">
-            {googleUser ? (
-              <div className="flex items-center gap-4 px-4 py-2 bg-white/5 border border-white/10 rounded-2xl">
-                <img src={googleUser.picture} className="w-8 h-8 rounded-full border border-[#00DC82]/30" alt="Avatar" />
-                <div className="hidden md:block">
-                  <div className="text-[10px] font-black uppercase text-[#00DC82] tracking-widest">Authenticated</div>
-                  <div className="text-[11px] font-bold text-slate-300">{googleUser.name}</div>
-                </div>
+            {googleUser && (
+              <div className="flex items-center gap-3 p-2 rounded-2xl bg-white/5 border border-white/10 pr-6">
+                <img src={googleUser.picture} className="w-6 h-6 rounded-full border border-[#00DC82]/30" alt="Avatar" />
+                <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{googleUser.name}</span>
               </div>
-            ) : (
-              <button 
-                onClick={handleGoogleLogin}
-                className="px-6 py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black tracking-[0.2em] uppercase hover:bg-white/10 transition-all flex items-center gap-3"
-              >
-                <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" className="w-4 h-4" />
-                Login with Google
-              </button>
             )}
-            <button 
-              onClick={() => setIsConfigOpen(true)} 
-              className="px-6 py-2.5 rounded-xl bg-nuxt-gradient text-black text-[10px] font-black tracking-[0.3em] uppercase shadow-xl hover:scale-105 transition-all"
-            >
-              Parameters
-            </button>
+            <button onClick={() => setIsConfigOpen(true)} className="px-8 py-3 bg-nuxt-gradient text-black text-[10px] font-black tracking-[0.2em] uppercase rounded-xl hover:scale-105 active:scale-95 transition-all shadow-xl">Protocol Params</button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-hidden relative">
-          <div className="absolute inset-0 opacity-[0.05] pointer-events-none" style={{ backgroundImage: 'radial-gradient(#00DC82 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-
+        <div className="flex-1 overflow-y-auto no-scrollbar relative bg-[#020420]">
           {activeTab === TabType.WORKSPACE && (
-            <div className="h-full flex flex-col items-center justify-center p-10 max-w-5xl mx-auto text-center gap-16 animate-modal-fade relative z-10">
-              <div className="space-y-6">
-                <h1 className="text-[10rem] leading-none font-black tracking-tighter text-nuxt drop-shadow-[0_0_30px_rgba(0,220,130,0.2)]">IntelliBuild</h1>
-                <p className="text-slate-500 text-[12px] font-black tracking-[1.2em] uppercase">Enterprise Agent Orchestration</p>
+            <div className="h-full flex flex-col items-center justify-center p-16 gap-16 animate-modal-fade text-center">
+              <div className="space-y-4">
+                <h1 className="text-[8.5rem] font-black tracking-tighter text-nuxt drop-shadow-2xl select-none">IntelliBuild</h1>
+                <p className="text-[12px] font-black text-slate-500 uppercase tracking-[1.5em] opacity-60">Neural Agent Orchestration</p>
               </div>
-              <div className="w-full relative group max-w-4xl">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Describe your Next.js Full-Stack evolution..."
-                  className="relative w-full h-72 bg-[#03062c] border border-[#1a1e43] rounded-[3.5rem] p-14 text-2xl outline-none focus:border-[#00DC82]/50 transition-all shadow-2xl placeholder:text-slate-800 font-medium custom-scrollbar"
+              <div className="w-full max-w-4xl relative group">
+                <textarea 
+                  value={input} 
+                  onChange={e => setInput(e.target.value)} 
+                  placeholder="Initiate evolution sequence. Describe your multi-agent protocol..." 
+                  className="w-full h-80 bg-[#03062c] border border-[#1a1e43] rounded-[4rem] p-16 text-2xl outline-none focus:border-[#00DC82]/50 shadow-[0_0_60px_rgba(0,0,0,0.5)] resize-none transition-all placeholder:text-slate-800 font-medium" 
                 />
-                <button
-                  onClick={handleGenerate}
-                  disabled={isGenerating}
-                  className="absolute bottom-12 right-12 px-16 py-6 bg-nuxt-gradient text-black rounded-2xl font-black text-[14px] tracking-[0.2em] uppercase shadow-[0_0_40px_rgba(0,220,130,0.5)] active:scale-95 transition-all disabled:opacity-50"
+                <button 
+                  onClick={handleGenerate} 
+                  disabled={isGenerating} 
+                  className="absolute bottom-12 right-12 px-16 py-6 bg-nuxt-gradient text-black rounded-2xl font-black text-[13px] uppercase tracking-[0.3em] shadow-[0_0_40px_rgba(0,220,130,0.4)] hover:scale-105 active:scale-95 transition-all"
                 >
                   {isGenerating ? 'Synthesizing...' : 'Initialize Build'}
                 </button>
@@ -470,293 +250,268 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {activeTab === TabType.DRIVE && (
-            <div className="h-full flex flex-col p-12 gap-8 animate-modal-fade overflow-y-auto custom-scrollbar max-w-[1400px] mx-auto">
-               <div className="flex flex-col items-center text-center gap-4 mb-8">
-                 <h2 className="text-7xl font-black tracking-tighter uppercase text-[#00DC82]">Drive Intelligence</h2>
-                 <p className="text-[12px] font-black text-slate-500 tracking-[1em] uppercase">Cloud Drive Synchronization Protocol</p>
-               </div>
-               
-               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 h-full">
-                  <div className="p-12 bg-[#03062c] border border-[#1a1e43] rounded-[4rem] space-y-10 shadow-2xl flex flex-col">
-                    <div className="text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] mb-4">Orchestration Setup</div>
-                    
-                    {!googleUser ? (
-                      <div className="flex-1 flex flex-col items-center justify-center gap-8 py-20 text-center">
-                        <div className="text-5xl opacity-20">🔐</div>
-                        <p className="text-slate-500 font-medium">Authentication required to access Drive Shards.</p>
-                        <button onClick={handleGoogleLogin} className="px-10 py-5 bg-nuxt-gradient text-black font-black uppercase tracking-widest rounded-2xl">Connect Google Account</button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="space-y-4">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2">Target Cloud Directory</label>
-                          <div className="flex gap-4">
-                            <select 
-                              value={selectedDriveFolder} 
-                              onChange={e => setSelectedDriveFolder(e.target.value)}
-                              className="flex-1 bg-[#020420] border border-[#1a1e43] rounded-2xl px-8 py-5 text-sm outline-none focus:border-[#00DC82]/50 appearance-none"
-                            >
-                              <option value="">Root Drive (/) </option>
-                              {driveFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                            </select>
-                            <button onClick={handleDriveFetchFolders} className="px-6 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Refresh</button>
+          {activeTab === TabType.AGENT_MANAGER && (
+            <div className="h-full flex flex-col animate-modal-fade">
+              <div className="p-16 px-20 flex justify-between items-end border-b border-[#1a1e43] bg-black/20">
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h2 className="text-7xl font-black tracking-tighter uppercase text-[#00DC82]">Distributed Agents</h2>
+                    <p className="text-[12px] font-black text-slate-500 tracking-[1em] uppercase leading-relaxed">Agent Governance & Neural Provisioning</p>
+                  </div>
+                  <div className="flex gap-10">
+                    <button 
+                      onClick={() => setAgentTab('TEAM')} 
+                      className={`text-[11px] font-black uppercase tracking-[0.3em] pb-3 border-b-2 transition-all ${agentTab === 'TEAM' ? 'border-[#00DC82] text-white' : 'border-transparent text-slate-600 hover:text-slate-400'}`}
+                    >
+                      Active Shards ({agents.length})
+                    </button>
+                    <button 
+                      onClick={() => setAgentTab('REGISTRY')} 
+                      className={`text-[11px] font-black uppercase tracking-[0.3em] pb-3 border-b-2 transition-all ${agentTab === 'REGISTRY' ? 'border-[#00DC82] text-white' : 'border-transparent text-slate-600 hover:text-slate-400'}`}
+                    >
+                      Neural Registry
+                    </button>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => { setEditingAgent({ model: 'gemini-3-flash-preview' }); setIsAgentModalOpen(true); }}
+                  className="px-10 py-5 bg-nuxt-gradient text-black font-black uppercase text-[12px] tracking-widest rounded-2xl shadow-xl hover:scale-105 transition-all mb-4"
+                >
+                  Provision New Shard
+                </button>
+              </div>
+
+              <div className="flex-1 p-20 overflow-y-auto custom-scrollbar">
+                {agentTab === 'TEAM' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                    {agents.map(agent => (
+                      <div key={agent.id} className="p-10 bg-[#03062c] border border-[#1a1e43] rounded-[3rem] shadow-xl hover:border-[#00DC82]/30 transition-all group relative flex flex-col">
+                        <div className="flex items-center justify-between mb-8">
+                          <div className="w-16 h-16 rounded-[1.5rem] bg-white/5 flex items-center justify-center text-3xl group-hover:scale-110 transition-transform">🤖</div>
+                          <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${agent.status === 'active' ? 'bg-[#00DC82]/10 text-[#00DC82]' : 'bg-slate-800 text-slate-500'}`}>
+                            {agent.status}
                           </div>
                         </div>
-
-                        <div className="pt-10 border-t border-white/5 flex flex-col gap-6">
-                           <div className="flex items-center justify-between px-2">
-                             <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shard Integrity</div>
-                             <div className="text-[10px] font-bold text-[#00DC82]">{generationResult?.files.length || 0} Files Detected</div>
-                           </div>
-                           <button 
-                             onClick={handleDriveSync}
-                             disabled={driveIsLoading || !generationResult}
-                             className="w-full py-8 bg-nuxt-gradient text-black font-black uppercase tracking-[0.3em] text-[13px] rounded-[2.5rem] shadow-2xl hover:scale-[1.02] transition-all disabled:opacity-30"
-                           >
-                             {driveIsLoading ? 'Syncing...' : 'Start Cloud Sync'}
-                           </button>
+                        <div className="space-y-2 mb-6">
+                          <h3 className="text-2xl font-black text-white">{agent.name}</h3>
+                          <div className="text-[11px] font-black text-[#00DC82] uppercase tracking-[0.2em]">{agent.role}</div>
                         </div>
-                      </>
-                    )}
+                        <p className="text-sm text-slate-400 leading-relaxed mb-10 flex-1 line-clamp-3 italic opacity-80">
+                          "{agent.instruction}"
+                        </p>
+                        <div className="pt-8 border-t border-white/5 flex items-center justify-between mt-auto">
+                          <div className="text-[10px] font-mono text-slate-600 uppercase">
+                            Core: {agent.model}
+                          </div>
+                          <div className="flex gap-6">
+                            <button onClick={() => handleShareAgent(agent)} className="text-[10px] font-black uppercase text-[#00DC82]/70 hover:text-[#00DC82] transition-colors">Broadcast</button>
+                            <button onClick={() => { setEditingAgent(agent); setIsAgentModalOpen(true); }} className="text-[10px] font-black uppercase text-slate-400 hover:text-white transition-colors">Config</button>
+                            <button onClick={() => handleDeleteAgent(agent.id)} className="text-[10px] font-black uppercase text-red-500/50 hover:text-red-500 transition-colors">Terminate</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-
-                  <div className="p-10 bg-[#020420] border border-[#1a1e43] rounded-[4rem] shadow-2xl flex flex-col overflow-hidden">
-                    <div className="text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] border-b border-white/5 pb-6 mb-6">Drive Protocol Stream</div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar font-mono text-[12px] space-y-4 pr-4">
-                       {driveLogs.length === 0 ? <div className="text-slate-800 italic opacity-40">Ready for synchronization...</div> : driveLogs.map((log, i) => <div key={i} className={log.includes('ERROR') ? 'text-red-400' : 'text-[#00DC82]'}>{log}</div>)}
-                    </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                    {MARKETPLACE_AGENTS.map(agent => (
+                      <div key={agent.id} className="p-10 bg-[#020420] border border-[#1a1e43] rounded-[3rem] shadow-2xl hover:border-[#00DC82]/50 transition-all group flex flex-col border-dashed">
+                        <div className="flex items-center justify-between mb-8">
+                          <div className="w-16 h-16 rounded-[1.5rem] bg-[#00DC82]/5 flex items-center justify-center text-3xl group-hover:rotate-12 transition-transform">🛰️</div>
+                          <div className="px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-white/5 text-slate-500">
+                            Verified Shard
+                          </div>
+                        </div>
+                        <div className="space-y-2 mb-6">
+                          <h3 className="text-2xl font-black text-white">{agent.name}</h3>
+                          <div className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">{agent.role}</div>
+                        </div>
+                        <p className="text-sm text-slate-500 leading-relaxed mb-10 flex-1">
+                          {agent.instruction}
+                        </p>
+                        <button 
+                          onClick={() => handleDownloadRegistryAgent(agent)}
+                          className="w-full py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-300 hover:bg-[#00DC82] hover:text-black transition-all flex items-center justify-center gap-3"
+                        >
+                          <span>Sync Shard</span>
+                          <span className="text-lg">📥</span>
+                        </button>
+                      </div>
+                    ))}
                   </div>
-               </div>
+                )}
+              </div>
             </div>
           )}
 
-          {activeTab === TabType.GCS && (
-            <div className="h-full flex flex-col p-12 gap-8 animate-modal-fade overflow-y-auto custom-scrollbar">
-               <div className="flex flex-col items-center text-center gap-4 mb-8">
-                 <h2 className="text-7xl font-black tracking-tighter uppercase text-[#00DC82]">Cloud Orchestration</h2>
-                 <p className="text-[12px] font-black text-slate-500 tracking-[1em] uppercase leading-relaxed">GCS Enterprise Asset Management Protocol</p>
-               </div>
-               
-               <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 max-w-[1700px] mx-auto w-full h-full min-h-[650px]">
-                 <div className="p-10 bg-[#03062c] border border-[#1a1e43] rounded-[3.5rem] space-y-10 shadow-2xl flex flex-col h-fit">
-                    {!googleUser ? (
-                       <div className="text-center py-10 space-y-6">
-                         <div className="text-4xl opacity-20">☁️</div>
-                         <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Connect Google to manage Cloud Shards</p>
-                         <button onClick={handleGoogleLogin} className="w-full py-4 bg-nuxt-gradient text-black font-black uppercase rounded-2xl">Connect</button>
-                       </div>
-                    ) : (
-                      <>
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-2">Project Identifier</label>
-                          <div className="flex gap-3">
-                            <input type="text" value={gcsProjectId} onChange={e => setGcsProjectId(e.target.value)} className="flex-1 bg-[#020420] border border-[#1a1e43] rounded-2xl px-6 py-4 text-xs outline-none focus:border-[#00DC82]/50" placeholder="my-gcp-project" />
-                            <button onClick={handleGCSFetchBuckets} disabled={gcsIsLoading || !gcsProjectId} className="px-5 py-2 bg-white/5 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Scan</button>
-                          </div>
-                        </div>
-
-                        <div className="pt-8 border-t border-white/5 space-y-6">
-                          <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Bucket Provisioning</div>
-                          <div className="flex gap-3">
-                            <input type="text" value={newBucketName} onChange={e => setNewBucketName(e.target.value)} placeholder="new-bucket-alias" className="flex-1 bg-[#020420] border border-[#1a1e43] rounded-2xl px-6 py-4 text-xs outline-none focus:border-[#00DC82]/50" />
-                            <button onClick={handleGCSCreateBucket} disabled={gcsIsLoading || !newBucketName} className="px-5 py-2 bg-[#00DC82] text-black rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:scale-105 transition-all">Create</button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                 </div>
-
-                 <div className="lg:col-span-3 flex flex-col gap-8 h-full">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                       <div className="p-8 bg-[#03062c] border border-[#1a1e43] rounded-[3rem] shadow-xl flex flex-col gap-4">
-                          <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Active Bucket Target</div>
-                          <select 
-                            value={selectedBucket} 
-                            onChange={e => {
-                              setSelectedBucket(e.target.value);
-                              handleGCSFetchObjects(e.target.value);
-                            }} 
-                            className="w-full bg-[#020420] border border-[#1a1e43] rounded-2xl px-6 py-4 text-xs outline-none focus:border-[#00DC82]/50"
-                          >
-                            <option value="">Select deployment target...</option>
-                            {gcsBuckets.map(b => <option key={b.id} value={b.name}>{b.name} ({b.location})</option>)}
-                          </select>
-                          <button 
-                            onClick={handleGCSUpload}
-                            disabled={gcsIsLoading || !selectedBucket || !generationResult}
-                            className="mt-2 w-full py-4 bg-nuxt-gradient text-black font-black uppercase tracking-[0.3em] text-[10px] rounded-2xl shadow-xl hover:scale-[1.02] transition-all disabled:opacity-30"
-                          >
-                            {gcsIsLoading ? 'Synchronizing Shards...' : 'Deploy Project Shards to GCS'}
-                          </button>
-                       </div>
+          {activeTab === TabType.BLOB && (
+            <div className="h-full p-20 flex flex-col gap-12 animate-modal-fade max-w-6xl mx-auto">
+              <div className="space-y-4">
+                <h2 className="text-7xl font-black tracking-tighter uppercase text-[#00DC82]">Cloud Shard DB</h2>
+                <p className="text-[12px] font-black text-slate-500 tracking-[1em] uppercase leading-relaxed">Vercel Blob Persistent Storage Gateway</p>
+              </div>
+              <div className="p-12 bg-[#03062c] border border-[#1a1e43] rounded-[4rem] shadow-2xl space-y-12">
+                <div className="space-y-6">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-4">Database Persistence Token</label>
+                  <input type="password" value={blobToken} onChange={e => setBlobToken(e.target.value)} placeholder="BLOB_READ_WRITE_TOKEN" className="w-full bg-[#020420] border border-[#1a1e43] rounded-3xl px-10 py-6 text-sm outline-none focus:border-[#00DC82]/50 font-mono text-[#00DC82]" />
+                </div>
+                <div className="flex gap-6">
+                  <button onClick={handleBlobSync} className="flex-1 py-6 bg-white/5 border border-white/10 rounded-2xl font-black text-[11px] tracking-widest hover:bg-white/10 transition-all uppercase">Analyze Store</button>
+                  <button onClick={handleBlobUpload} disabled={!generationResult || !blobToken} className="flex-1 py-6 bg-nuxt-gradient text-black rounded-2xl font-black text-[11px] tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-xl uppercase">Sync Current State</button>
+                </div>
+              </div>
+              <div className="space-y-6">
+                {blobList.map((blob, i) => (
+                  <div key={i} className="p-8 bg-[#03062c] border border-[#1a1e43] rounded-[2.5rem] flex items-center justify-between group hover:border-[#00DC82]/40 transition-all">
+                    <div className="flex flex-col gap-2 overflow-hidden pr-10">
+                      <span className="text-[13px] font-bold text-white truncate">{blob.pathname}</span>
+                      <span className="text-[10px] text-slate-500 font-mono truncate opacity-60">{blob.url}</span>
                     </div>
-
-                    <div className="flex-1 p-10 bg-[#020420] border border-[#1a1e43] rounded-[4rem] shadow-2xl overflow-hidden flex flex-col relative">
-                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                           {gcsObjects.length === 0 ? (
-                             <div className="h-full flex flex-col items-center justify-center text-slate-700 gap-6 opacity-30">
-                                <div className="text-8xl">📦</div>
-                                <div className="text-[12px] font-black uppercase tracking-[0.6em] text-center">No objects found in current namespace</div>
-                             </div>
-                           ) : (
-                             gcsObjects.map((obj) => (
-                               <div key={obj.id} className="flex items-center justify-between p-5 bg-[#03062c]/40 border border-white/5 rounded-[2rem] group hover:border-[#00DC82]/20 hover:bg-[#03062c]/80 transition-all">
-                                  <div className="flex items-center gap-6">
-                                    <div className="w-11 h-11 rounded-2xl bg-white/5 flex items-center justify-center text-lg">📄</div>
-                                    <div className="space-y-1">
-                                      <div className="text-sm font-bold text-slate-300 group-hover:text-[#00DC82] transition-colors">{obj.name}</div>
-                                      <div className="flex items-center gap-4 text-[9px] font-mono text-slate-500 uppercase tracking-tighter">
-                                        <span>Size: {(parseInt(obj.size) / 1024).toFixed(2)} KB</span>
-                                        <span>Updated: {new Date(obj.updated).toLocaleDateString()}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                               </div>
-                             ))
-                           )}
-                        </div>
-                    </div>
-                 </div>
-               </div>
+                    <a href={blob.url} target="_blank" rel="noreferrer" className="text-[#00DC82] text-[11px] font-black uppercase tracking-[0.2em] px-8 py-3 bg-[#00DC82]/10 rounded-xl hover:bg-[#00DC82]/20 transition-all">Inspect</a>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           {activeTab === TabType.EDITOR && generationResult && (
             <div className="h-full flex animate-modal-fade">
-              <div className="w-96 border-r border-[#1a1e43] bg-[#020420] flex flex-col shadow-2xl">
-                <div className="p-10 text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] border-b border-[#1a1e43]">Project Shards</div>
+              <div className="w-[380px] border-r border-[#1a1e43] bg-[#020420] flex flex-col shrink-0 shadow-2xl z-10">
+                <div className="p-10 text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] border-b border-[#1a1e43]">Source Protocol Shards</div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar py-6">
                   {generationResult.files.map(file => (
-                    <button key={file.path} onClick={() => setSelectedFile(file)} className={`w-full text-left px-12 py-6 text-[11px] font-bold border-l-4 transition-all ${selectedFile?.path === file.path ? 'bg-[#00DC82]/5 border-[#00DC82] text-[#00DC82]' : 'border-transparent text-slate-500 hover:text-white'}`}>
-                      {file.path.split('/').pop()}
+                    <button key={file.path} onClick={() => setSelectedFile(file)} className={`w-full text-left px-12 py-5 text-[12px] font-bold border-l-[6px] transition-all flex items-center gap-4 ${selectedFile?.path === file.path ? 'bg-[#00DC82]/5 border-[#00DC82] text-[#00DC82]' : 'border-transparent text-slate-600 hover:text-white hover:bg-white/5'}`}>
+                      <span className="opacity-40">{file.path.endsWith('.tsx') ? '⚛️' : '📄'}</span>
+                      <span className="truncate">{file.path.split('/').pop()}</span>
                     </button>
                   ))}
                 </div>
-                <div className="p-8 border-t border-[#1a1e43] bg-black/40 space-y-4">
-                  <div className="flex items-center justify-between px-2">
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Production Pipeline</span>
-                    <div className={`w-2 h-2 rounded-full ${deployStatus?.state === 'READY' ? 'bg-[#00DC82]' : deployStatus ? 'bg-[#00DC82] animate-pulse' : 'bg-slate-800'}`} />
-                  </div>
-                  <button 
-                    onClick={handleDeploy} 
-                    disabled={isDeploying} 
-                    className="w-full py-4 bg-nuxt-gradient text-black font-black uppercase tracking-[0.2em] text-[10px] rounded-xl shadow-xl hover:scale-[1.02] transition-all disabled:opacity-50"
-                  >
-                    {isDeploying ? 'Deploying Shards...' : 'Launch to Vercel'}
+                <div className="p-10 border-t border-[#1a1e43] bg-black/40 flex flex-col gap-5">
+                  <button onClick={handleExportColab} className="w-full py-5 bg-white/5 border border-white/10 text-slate-300 font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl hover:bg-white/10 flex items-center justify-center gap-4 shadow-xl transition-all">
+                    <span className="text-lg">📓</span> Google Colab Link
                   </button>
+                  <button onClick={() => setActiveTab(TabType.DEPLOY)} className="w-full py-6 bg-nuxt-gradient text-black font-black uppercase tracking-[0.3em] text-[11px] rounded-2xl shadow-[0_0_30px_rgba(0,220,130,0.3)] hover:scale-105 active:scale-95 transition-all">Initiate Deployment</button>
                 </div>
               </div>
               <div className="flex-1 bg-[#020420]">
-                <Editor height="100%" theme="vs-dark" path={selectedFile?.path} defaultLanguage="typescript" value={selectedFile?.content} options={{ minimap: { enabled: false }, fontSize: 16 }} />
+                {selectedFile ? <Editor height="100%" theme="vs-dark" path={selectedFile.path} defaultLanguage="typescript" value={selectedFile.content} options={{ minimap: { enabled: false }, fontSize: 16, lineHeight: 28, fontFamily: 'JetBrains Mono', padding: { top: 40, bottom: 40 } }} /> : <div className="h-full flex flex-col items-center justify-center text-slate-800 uppercase tracking-[1em] font-black opacity-30 select-none"><div className="text-8xl mb-8">💎</div>Awaiting Shard Selection</div>}
               </div>
             </div>
           )}
 
-          {activeTab === TabType.GITHUB && (
-            <div className="h-full flex flex-col items-center justify-center p-20 max-w-5xl mx-auto gap-12 animate-modal-fade">
-               <div className="text-center space-y-6">
-                 <h2 className="text-7xl font-black tracking-tighter uppercase text-[#00DC82]">SCM Orchestration</h2>
-                 <p className="text-[11px] font-black text-slate-500 tracking-[0.8em] uppercase leading-relaxed">GitHub Atomic Sync Protocol</p>
-               </div>
-               
-               <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-10">
-                 <div className="p-12 bg-[#03062c] border border-[#1a1e43] rounded-[3.5rem] space-y-8 shadow-2xl">
-                    <div className="space-y-6">
-                      <div className="space-y-3">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-2">Access Token</label>
-                        <input type="password" value={ghToken} onChange={e => setGhToken(e.target.value)} className="w-full bg-[#020420] border border-[#1a1e43] rounded-2xl px-8 py-5 text-sm outline-none focus:border-[#00DC82]/50" placeholder="ghp_..." />
-                      </div>
-                      <div className="space-y-3">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-2">Repository Name</label>
-                        <input type="text" value={ghRepoName} onChange={e => setGhRepoName(e.target.value)} className="w-full bg-[#020420] border border-[#1a1e43] rounded-2xl px-8 py-5 text-sm outline-none focus:border-[#00DC82]/50" placeholder="my-awesome-evolution" />
-                      </div>
-                      <div className="space-y-3">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-2">Repository Description</label>
-                        <input type="text" value={ghDescription} onChange={e => setGhDescription(e.target.value)} className="w-full bg-[#020420] border border-[#1a1e43] rounded-2xl px-8 py-5 text-sm outline-none focus:border-[#00DC82]/50" placeholder="Description of your evolution..." />
-                      </div>
-                    </div>
-                    <button 
-                      onClick={handleGitHubSync}
-                      disabled={ghIsProvisioning || !ghToken || !ghRepoName || !generationResult}
-                      className="w-full py-6 bg-nuxt-gradient text-black font-black uppercase tracking-[0.3em] text-[12px] rounded-2xl shadow-xl transition-all disabled:opacity-30"
-                    >
-                      {ghIsProvisioning ? 'Syncing...' : 'Push to GitHub'}
-                    </button>
-                 </div>
-                 
-                 <div className="p-10 bg-[#020420] border border-[#1a1e43] rounded-[3.5rem] flex flex-col gap-6 shadow-2xl overflow-hidden">
-                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-[#1a1e43] pb-4">Log Sequence</div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-3 pr-2">
-                       {ghLogs.length === 0 ? <div className="text-slate-800 italic">Protocol idle...</div> : ghLogs.map((log, i) => <div key={i} className={log.includes('ERROR') ? 'text-red-500' : 'text-[#00DC82]'}>{log}</div>)}
-                    </div>
-                 </div>
-               </div>
-            </div>
-          )}
-          
-          {activeTab === TabType.IMAGE_GEN && (
-            <div className="h-full flex flex-col items-center justify-center p-24 animate-modal-fade max-w-5xl mx-auto gap-16">
-               <h2 className="text-7xl font-black uppercase text-[#00DC82]">Visual Artifacts</h2>
-               <div className="w-full flex gap-6 p-2 bg-[#03062c] border border-[#1a1e43] rounded-[2.5rem] shadow-2xl">
-                 <input type="text" value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} className="flex-1 bg-transparent px-10 py-6 text-xl outline-none" placeholder="Describe artifact..." />
-                 <button onClick={handleImageGen} disabled={isImageGenerating} className="px-14 py-6 bg-nuxt-gradient text-black font-black uppercase text-[13px] rounded-3xl">Generate</button>
-               </div>
-               {generatedImageUrl && <img src={generatedImageUrl} className="w-full rounded-[4rem] border border-[#1a1e43] shadow-2xl" alt="Artifact" />}
-               {isImageGenerating && <div className="animate-pulse text-[#00DC82] font-black uppercase tracking-[0.5em]">Synthesizing Neural Art...</div>}
-            </div>
-          )}
-
-          {activeTab === TabType.DEPLOY && (
-            <div className="h-full flex flex-col items-center justify-center p-20 max-w-4xl mx-auto gap-16 animate-modal-fade text-center">
-              <div className="w-40 h-40 bg-nuxt-gradient rounded-[3rem] flex items-center justify-center shadow-[0_0_60px_rgba(0,220,130,0.3)] animate-pulse">
-                <span className="text-7xl">⚡</span>
+          {activeTab === TabType.WEBSITE_GEN && (
+            <div className="h-full flex animate-modal-fade">
+              <div className="w-[520px] border-r border-[#1a1e43] p-16 flex flex-col gap-14 bg-[#020420] shadow-2xl shrink-0">
+                <div className="space-y-4">
+                  <h2 className="text-6xl font-black text-[#00DC82] uppercase tracking-tighter">Web Studio</h2>
+                  <p className="text-[11px] font-black text-slate-600 uppercase tracking-[0.8em]">Rapid Visual Synthesis</p>
+                </div>
+                <textarea value={webPrompt} onChange={e => setWebPrompt(e.target.value)} placeholder="Describe the UI/UX architecture and aesthetic requirements..." className="w-full h-56 bg-[#03062c] border border-[#1a1e43] rounded-[3rem] p-10 text-base outline-none resize-none focus:border-[#00DC82]/50 transition-all font-medium" />
+                <button onClick={handleWebGen} disabled={isWebGenLoading} className="w-full py-8 bg-nuxt-gradient text-black font-black uppercase text-[13px] tracking-[0.3em] rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all">{isWebGenLoading ? 'Baking Architecture...' : 'Synthesize Website'}</button>
               </div>
-              <h2 className="text-7xl font-black uppercase text-[#00DC82]">Production Pipeline</h2>
-              {!deployStatus ? (
-                <div className="w-full space-y-12 bg-[#03062c] border border-[#1a1e43] p-20 rounded-[4rem] shadow-2xl nuxt-glow">
-                  <input type="password" placeholder="Vercel API Token" value={vercelToken} onChange={(e) => setVercelToken(e.target.value)} className="w-full bg-[#020420] border border-[#1a1e43] rounded-[1.5rem] px-12 py-7 text-sm outline-none text-center" />
-                  <button onClick={handleDeploy} disabled={isDeploying || !vercelToken || !generationResult} className="w-full py-8 bg-nuxt-gradient text-black font-black uppercase text-[14px] rounded-3xl">
-                    {isDeploying ? 'Deploying...' : 'Initialize Vercel Deploy'}
-                  </button>
-                </div>
-              ) : (
-                <div className="w-full p-20 bg-[#03062c] border border-[#00DC82]/30 rounded-[4rem] space-y-12">
-                   <p className="text-5xl font-black text-[#00DC82] uppercase">{deployStatus.state}</p>
-                   <a href={`https://${deployStatus.url}`} target="_blank" rel="noopener noreferrer" className="block p-10 bg-[#020420] border border-[#1a1e43] rounded-[2rem] text-[#00DC82] font-mono text-2xl truncate">
-                     {deployStatus.url}
-                   </a>
-                </div>
-              )}
+              <div className="flex-1 bg-white relative overflow-hidden">
+                {generatedHtml ? <iframe ref={previewRef} title="Web Preview" className="w-full h-full border-none" srcDoc={generatedHtml} /> : <div className="h-full flex flex-col items-center justify-center text-slate-300 bg-[#020420] opacity-30 uppercase tracking-[1.5em] font-black select-none"><div className="text-9xl mb-12">🎨</div>Visual Canvas Standby</div>}
+              </div>
             </div>
           )}
         </div>
       </main>
 
-      <NeuralModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} title="Studio Protocol Config" size="lg">
-        <div className="space-y-16">
-          <div className="grid grid-cols-2 gap-16">
-            <div className="space-y-6">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Creativity Gain</label>
-              <input type="range" min="0" max="1" step="0.1" value={modelConfig.temperature} onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})} className="w-full" />
+      {/* Agent Provisioning Modal */}
+      <NeuralModal 
+        isOpen={isAgentModalOpen} 
+        onClose={() => setIsAgentModalOpen(false)} 
+        title={editingAgent?.id ? "Edit Intelligence Shard" : "Provision New Agent Shard"}
+        size="lg"
+        transition="fadeSlideIn"
+      >
+        <div className="space-y-10 p-4">
+          <div className="grid grid-cols-2 gap-10">
+            <div className="space-y-4">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Agent Ident</label>
+              <input 
+                type="text" 
+                value={editingAgent?.name || ''} 
+                onChange={e => setEditingAgent(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full bg-[#03062c] border border-[#1a1e43] rounded-2xl px-8 py-5 text-sm outline-none focus:border-[#00DC82]/50 text-white"
+                placeholder="Agent Name"
+              />
             </div>
-            <div className="space-y-6">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Reasoning Depth</label>
-              <select value={modelConfig.thinkingBudget} onChange={(e) => setModelConfig({...modelConfig, thinkingBudget: parseInt(e.target.value)})} className="w-full bg-[#020420] border border-[#1a1e43] rounded-2xl px-8 py-5 text-[12px] text-[#00DC82]">
-                <option value="0">Standard</option>
-                <option value="16384">Balanced</option>
-                <option value="32768">Deep Neural</option>
+            <div className="space-y-4">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Core Directive (Role)</label>
+              <input 
+                type="text" 
+                value={editingAgent?.role || ''} 
+                onChange={e => setEditingAgent(prev => ({ ...prev, role: e.target.value }))}
+                className="w-full bg-[#03062c] border border-[#1a1e43] rounded-2xl px-8 py-5 text-sm outline-none focus:border-[#00DC82]/50 text-white"
+                placeholder="e.g. System Architect"
+              />
+            </div>
+          </div>
+          <div className="space-y-4">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Neural Substrate (Model)</label>
+            <select 
+              value={editingAgent?.model || 'gemini-3-flash-preview'} 
+              onChange={e => setEditingAgent(prev => ({ ...prev, model: e.target.value }))}
+              className="w-full bg-[#03062c] border border-[#1a1e43] rounded-2xl p-6 text-[13px] text-[#00DC82] outline-none font-bold tracking-widest"
+            >
+              <option value="gemini-3-flash-preview">Gemini 3 Flash (Fast Inference)</option>
+              <option value="gemini-3-pro-preview">Gemini 3 Pro (High Reasoning)</option>
+              <option value="gemini-2.5-flash-native-audio-preview-09-2025">Gemini 2.5 Audio (Native Multimodal)</option>
+            </select>
+          </div>
+          <div className="space-y-4">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">System Instructions (Inference Protocol)</label>
+            <textarea 
+              value={editingAgent?.instruction || ''} 
+              onChange={e => setEditingAgent(prev => ({ ...prev, instruction: e.target.value }))}
+              className="w-full h-48 bg-[#03062c] border border-[#1a1e43] rounded-[2rem] p-8 text-xs text-slate-400 outline-none resize-none custom-scrollbar font-medium leading-relaxed"
+              placeholder="Define agent behaviors, goals, and constraints..."
+            />
+          </div>
+          <div className="flex justify-end gap-6 pt-6">
+            <button onClick={() => setIsAgentModalOpen(false)} className="px-10 py-4 text-[10px] font-black uppercase text-slate-500 hover:text-white transition-colors">Cancel</button>
+            <button onClick={handleSaveAgent} className="px-12 py-4 bg-nuxt-gradient text-black rounded-xl font-black text-[11px] uppercase tracking-widest shadow-xl">{editingAgent?.id ? 'Update Shard' : 'Initialize Shard'}</button>
+          </div>
+        </div>
+      </NeuralModal>
+
+      <NeuralModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} title="Evolution Protocol Configuration" size="lg" transition="fadeSlideIn">
+        <div className="space-y-20 p-4">
+          <div className="grid grid-cols-2 gap-20">
+            <div className="space-y-8">
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em]">Creativity Coefficient</label>
+              <input type="range" min="0" max="1" step="0.1" value={modelConfig.temperature} onChange={e => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})} className="w-full" />
+              <div className="flex justify-between text-[10px] font-black text-slate-700 tracking-widest"><span>DETERMINISTIC</span><span>EVOLUTIONARY</span></div>
+            </div>
+            <div className="space-y-8">
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em]">Neural Shard Depth</label>
+              <select value={modelConfig.thinkingBudget} onChange={e => setModelConfig({...modelConfig, thinkingBudget: parseInt(e.target.value)})} className="w-full bg-[#03062c] border border-[#1a1e43] rounded-2xl p-6 text-[13px] text-[#00DC82] outline-none font-bold tracking-widest">
+                <option value="0">Flash Protocol (Standard)</option>
+                <option value="16384">Balanced Reasoning Shard</option>
+                <option value="32768">Deep Intelligence Protocol</option>
               </select>
             </div>
           </div>
-          <div className="space-y-6">
-             <label className="text-[10px] font-black text-slate-500 uppercase">System Protocol</label>
-             <textarea value={modelConfig.systemInstruction} onChange={(e) => setModelConfig({...modelConfig, systemInstruction: e.target.value})} className="w-full h-56 bg-[#020420] border border-[#1a1e43] rounded-3xl p-8 text-[13px] text-slate-400 outline-none resize-none custom-scrollbar" />
+          <div className="space-y-8">
+            <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em]">Core System Instruction Override</label>
+            <textarea value={modelConfig.systemInstruction} onChange={e => setModelConfig({...modelConfig, systemInstruction: e.target.value})} className="w-full h-64 bg-[#03062c] border border-[#1a1e43] rounded-[2.5rem] p-10 text-[13px] text-slate-400 outline-none resize-none custom-scrollbar font-medium leading-relaxed" />
           </div>
         </div>
       </NeuralModal>
     </div>
   );
 };
+
+const NavButton: React.FC<{ icon: string; label: string; type: TabType; active: TabType; onClick: (t: TabType) => void }> = ({ icon, label, type, active, onClick }) => (
+  <button onClick={() => onClick(type)} className={`group relative flex flex-col items-center gap-2 transition-all duration-500 ${active === type ? 'text-[#00DC82]' : 'text-gray-600 hover:text-white'}`}>
+    <div className={`p-4 rounded-2xl transition-all duration-300 ${active === type ? 'bg-[#00DC82]/10 shadow-[inset_0_0_15px_rgba(0,220,130,0.1)]' : 'hover:bg-white/5'}`}>
+      <span className="text-2xl drop-shadow-md">{icon}</span>
+    </div>
+    <span className="absolute left-full ml-6 px-4 py-2 bg-[#1a1e43] text-[10px] font-black text-[#00DC82] rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-300 uppercase tracking-[0.3em] shadow-2xl pointer-events-none whitespace-nowrap z-50 border border-[#00DC82]/20 translate-x-[-10px] group-hover:translate-x-0">
+      {label}
+    </span>
+  </button>
+);
 
 export default App;
