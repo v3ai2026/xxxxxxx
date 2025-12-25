@@ -9,6 +9,7 @@ export const GlowCursor: React.FC<{ className?: string }> = ({ className = '' })
   useEffect(() => {
     // Check if it's a mobile device
     const checkMobile = () => {
+      if (typeof window === 'undefined') return;
       setIsMobile(window.innerWidth < 768 || 'ontouchstart' in window);
     };
     

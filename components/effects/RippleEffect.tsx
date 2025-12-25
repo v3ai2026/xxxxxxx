@@ -11,6 +11,8 @@ export const RippleEffect: React.FC<{ className?: string }> = ({ className = '' 
   const [ripples, setRipples] = useState<Ripple[]>([]);
 
   useEffect(() => {
+    const timeoutIds: NodeJS.Timeout[] = [];
+
     const handleClick = (e: MouseEvent) => {
       const newRipple: Ripple = {
         id: Date.now(),
@@ -20,16 +22,20 @@ export const RippleEffect: React.FC<{ className?: string }> = ({ className = '' 
 
       setRipples((prev) => [...prev, newRipple]);
 
-      // Remove ripple after animation
-      setTimeout(() => {
+      // Remove ripple after animation with cleanup tracking
+      const timeoutId = setTimeout(() => {
         setRipples((prev) => prev.filter((r) => r.id !== newRipple.id));
       }, 1000);
+      
+      timeoutIds.push(timeoutId);
     };
 
     document.addEventListener('click', handleClick);
 
     return () => {
       document.removeEventListener('click', handleClick);
+      // Clear all pending timeouts
+      timeoutIds.forEach(id => clearTimeout(id));
     };
   }, []);
 

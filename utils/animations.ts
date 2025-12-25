@@ -107,6 +107,7 @@ export const softSpring = {
 
 // Check if user prefers reduced motion
 export const shouldReduceMotion = () => {
+  if (typeof window === 'undefined') return false;
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 };
 

@@ -58,6 +58,7 @@ export const NeuralButton: React.FC<{
   className?: string;
 }> = ({ children, onClick, variant = 'primary', size = 'md', loading = false, disabled = false, className = '' }) => {
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
+  const MAX_RIPPLES = 3; // Limit concurrent ripples
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (onClick && !disabled && !loading) {
@@ -65,7 +66,12 @@ export const NeuralButton: React.FC<{
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const newRipple = { id: Date.now(), x, y };
-      setRipples(prev => [...prev, newRipple]);
+      
+      setRipples(prev => {
+        const updated = [...prev, newRipple];
+        // Keep only the most recent ripples
+        return updated.slice(-MAX_RIPPLES);
+      });
       
       setTimeout(() => {
         setRipples(prev => prev.filter(r => r.id !== newRipple.id));
