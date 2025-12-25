@@ -795,6 +795,7 @@ const App: React.FC = () => {
           </div>
           <NeuralTextArea value={modelConfig.systemInstruction} onChange={e => setModelConfig({...modelConfig, systemInstruction: e.target.value})} label="System Instruction" className="h-32 md:h-48" />
           <NeuralSwitch checked={useDeepReasoning} onChange={setUseDeepReasoning} label="Deep Reasoning" description="Complex logic synthesis" />
+          <NeuralSwitch checked={sparkEffectsEnabled} onChange={setSparkEffectsEnabled} label="Spark Effects" description="Visual particle effects 🎆" />
           <NeuralButton onClick={() => setIsConfigOpen(false)} className="w-full">Save Protocols</NeuralButton>
         </div>
       </NeuralModal>
