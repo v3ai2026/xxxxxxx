@@ -563,32 +563,75 @@ const App: React.FC = () => {
 
           {/* GENESIS BUILDER WIZARD */}
           {activeTab === TabType.CREATION_BUILDER && (
-            <div className="min-h-full flex flex-col items-center justify-center p-4 md:p-20 animate-modal-fade">
+            <div className="min-h-full flex flex-col items-center justify-center p-4 md:p-20">
               {builderMode === 'CHOOSING' && (
-                <div className="max-w-6xl w-full space-y-8 md:space-y-16">
-                  <div className="text-center space-y-2 md:space-y-4">
-                    <h1 className="text-4xl md:text-8xl font-black tracking-tighter text-nuxt drop-shadow-2xl uppercase">Genesis</h1>
+                <motion.div 
+                  className="max-w-6xl w-full space-y-8 md:space-y-16"
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <motion.div 
+                    className="text-center space-y-2 md:space-y-4"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.6, delay: 0.2 }}
+                  >
+                    <motion.h1 
+                      className="text-4xl md:text-8xl font-black tracking-tighter text-nuxt drop-shadow-2xl uppercase"
+                      animate={{
+                        textShadow: [
+                          '0 0 20px rgba(0, 220, 130, 0.3)',
+                          '0 0 40px rgba(0, 220, 130, 0.6)',
+                          '0 0 20px rgba(0, 220, 130, 0.3)',
+                        ],
+                      }}
+                      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                    >
+                      Genesis
+                    </motion.h1>
                     <p className="text-slate-500 font-black uppercase tracking-[0.5em] md:tracking-[1em] text-[8px] md:text-[10px]">Select your creation protocol</p>
-                  </div>
+                  </motion.div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-10">
-                    <GlassCard className="group cursor-pointer p-6 md:p-12 text-left space-y-4 md:space-y-8" onClick={() => setBuilderMode('ARCHITECT')}>
-                      <div className="w-12 h-12 md:w-20 md:h-20 rounded-xl md:rounded-[2rem] bg-nuxt-gradient flex items-center justify-center text-black text-2xl md:text-4xl shadow-2xl transition-transform group-hover:rotate-12">🏗️</div>
-                      <div className="space-y-2 md:space-y-3">
-                        <h3 className="text-xl md:text-3xl font-black text-white group-hover:text-[#00DC82] transition-colors">Master Architect</h3>
-                        <p className="text-slate-400 text-xs md:text-sm leading-relaxed">Full-stack intelligence. Design sophisticated E-commerce, SaaS, or marketplaces.</p>
-                      </div>
-                    </GlassCard>
+                  <motion.div 
+                    className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-10"
+                    variants={staggerContainer}
+                    initial="hidden"
+                    animate="visible"
+                  >
+                    <motion.div variants={staggerItem}>
+                      <GlassCard className="group cursor-pointer p-6 md:p-12 text-left space-y-4 md:space-y-8 h-full" hover onClick={() => setBuilderMode('ARCHITECT')}>
+                        <motion.div 
+                          className="w-12 h-12 md:w-20 md:h-20 rounded-xl md:rounded-[2rem] bg-nuxt-gradient flex items-center justify-center text-black text-2xl md:text-4xl shadow-2xl"
+                          whileHover={{ rotate: 12, scale: 1.1 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          🏗️
+                        </motion.div>
+                        <div className="space-y-2 md:space-y-3">
+                          <h3 className="text-xl md:text-3xl font-black text-white group-hover:text-[#00DC82] transition-colors">Master Architect</h3>
+                          <p className="text-slate-400 text-xs md:text-sm leading-relaxed">Full-stack intelligence. Design sophisticated E-commerce, SaaS, or marketplaces.</p>
+                        </div>
+                      </GlassCard>
+                    </motion.div>
 
-                    <GlassCard className="group cursor-pointer p-6 md:p-12 text-left space-y-4 md:space-y-8" onClick={() => setBuilderMode('INSTANT')}>
-                      <div className="w-12 h-12 md:w-20 md:h-20 rounded-xl md:rounded-[2rem] bg-white/5 border border-white/10 flex items-center justify-center text-2xl md:text-4xl shadow-2xl transition-transform group-hover:scale-110">⚡</div>
-                      <div className="space-y-2 md:space-y-3">
-                        <h3 className="text-xl md:text-3xl font-black text-white group-hover:text-[#00DC82] transition-colors">Instant Synthesis</h3>
-                        <p className="text-slate-400 text-xs md:text-sm leading-relaxed">Simple prompt execution. One sentence vision manifestation.</p>
-                      </div>
-                    </GlassCard>
-                  </div>
-                </div>
+                    <motion.div variants={staggerItem}>
+                      <GlassCard className="group cursor-pointer p-6 md:p-12 text-left space-y-4 md:space-y-8 h-full" hover onClick={() => setBuilderMode('INSTANT')}>
+                        <motion.div 
+                          className="w-12 h-12 md:w-20 md:h-20 rounded-xl md:rounded-[2rem] bg-white/5 border border-white/10 flex items-center justify-center text-2xl md:text-4xl shadow-2xl"
+                          whileHover={{ scale: 1.15, rotate: -5 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          ⚡
+                        </motion.div>
+                        <div className="space-y-2 md:space-y-3">
+                          <h3 className="text-xl md:text-3xl font-black text-white group-hover:text-[#00DC82] transition-colors">Instant Synthesis</h3>
+                          <p className="text-slate-400 text-xs md:text-sm leading-relaxed">Simple prompt execution. One sentence vision manifestation.</p>
+                        </div>
+                      </GlassCard>
+                    </motion.div>
+                  </motion.div>
+                </motion.div>
               )}
 
               {builderMode === 'ARCHITECT' && (
