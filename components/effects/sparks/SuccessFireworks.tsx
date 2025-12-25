@@ -20,8 +20,8 @@ export const SuccessFireworks: React.FC<SuccessFireworksProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const systemRef = useRef<ParticleSystem | null>(null);
-  const timeoutRef = useRef<number | null>(null);
-  const intervalRef = useRef<number | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -61,7 +61,7 @@ export const SuccessFireworks: React.FC<SuccessFireworksProps> = ({
     systemRef.current.createExplosion(centerX, centerY, config);
 
     // Add vibration feedback on mobile
-    if (navigator.vibrate) {
+    if ('vibrate' in navigator && navigator.vibrate) {
       navigator.vibrate([100, 50, 100, 50, 200]);
     }
 

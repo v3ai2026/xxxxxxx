@@ -9,4 +9,4 @@ export { SparkRain } from './SparkRain';
 export { SuccessFireworks } from './SuccessFireworks';
 export { SparkBorder } from './SparkBorder';
 export { ParticleSystem } from './ParticleSystem';
-export type { Particle, Position, ParticleConfig } from './ParticleSystem';
+export type { Particle, Position, ParticleConfig } from './types';

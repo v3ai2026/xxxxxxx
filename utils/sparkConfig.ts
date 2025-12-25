@@ -3,7 +3,7 @@
  * Spark Effects Configuration
  */
 
-import { ParticleConfig } from '../components/effects/sparks/ParticleSystem';
+import type { ParticleConfig } from '../components/effects/sparks/types';
 
 export const sparkConfig: Record<string, ParticleConfig> = {
   // 💥 爆炸火花 - Explosion sparks
