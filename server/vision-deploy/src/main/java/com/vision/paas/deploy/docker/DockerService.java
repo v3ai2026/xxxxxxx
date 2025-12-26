@@ -231,7 +231,7 @@ public class DockerService {
     public void restartContainer(String containerId) {
         try {
             dockerClient.restartContainerCmd(containerId)
-                    .withtTimeout(30)
+                    .withTimeout(30)
                     .exec();
             log.info("Container restarted: {}", containerId);
         } catch (Exception e) {
